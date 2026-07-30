@@ -1,11 +1,33 @@
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #include "DinoGame.h"
 
-int main(int argc, char *argv[]) {
+static int RunDinoGame(void) {
     BEGIN();
     LOAD();
     MainUI();
     QUIT();
+    return 0;
 }
+
+int main(int argc, char *argv[]) {
+    (void)argc;
+    (void)argv;
+    return RunDinoGame();
+}
+
+#ifdef _WIN32
+int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous_instance,
+                   LPSTR command_line, int show_command) {
+    (void)instance;
+    (void)previous_instance;
+    (void)command_line;
+    (void)show_command;
+    return RunDinoGame();
+}
+#endif
 
 /********************************* The UI *********************************/
 void MainUI() {
