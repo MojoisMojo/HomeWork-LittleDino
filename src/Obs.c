@@ -49,8 +49,11 @@ void SetOutObs() {
 
 void ResetObs() {
     Obss *pObs = ObsEnd.last;
-    for (int i = cntObs; i > 0; i--, pObs = pObs->last)
+    for (int i = cntObs; i > 0; i--) {
+        Obss *last = pObs->last;
         free(pObs);
+        pObs = last;
+    }
     ObsHead.last = NULL;
     ObsHead.next = &ObsEnd;
     ObsEnd.last = &ObsHead;
@@ -62,8 +65,9 @@ void ResetObs() {
 
 void MoveObs() {
     Obss *pObs = ObsHead.next;
-    for (int i = cntObs; i > 0; i--, pObs = pObs->next)
+    for (int i = cntObs; i > 0; i--)
     {
+        Obss *next = pObs->next;
         SDL_Rect *rect = NULL;
         switch (pObs->type)
         {
@@ -80,6 +84,7 @@ void MoveObs() {
         }
         if (CheckDisappear(rect))
             DeleteObs(pObs);
+        pObs = next;
     }
     if (!PlusMol(&cntObsInterval, ((level >= 15) ? (rand() % 2) : 0) + 1, ObsInterval))
         SetOutObs();
