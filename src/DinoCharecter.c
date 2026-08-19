@@ -16,19 +16,25 @@ bool DoubleJump = false;
 double JumpSpeed = -2.0;
 
 int cntDinoDelay = 0;
+static bool IsDownHeld() {
+    const Uint8 *keyboardState = SDL_GetKeyboardState(NULL);
+    return keyboardState[SDL_SCANCODE_S] || keyboardState[SDL_SCANCODE_DOWN];
+}
 
 void PaintDino() {
     SDL_RenderCopy(Renderer, DinoTexture, DinoSrect + DinoSta, &DinoDrect);
 }
 
 void GravDino() {
+    bool downHeld = IsDownHeld();
     if (JumpSpeed < 3.0)
         JumpSpeed += GraAc;
     if (DinoDrect.y + DinoDrect.h >= BornedRect.y - 30)
     {
         DinoDrect.y = BornedRect.y - DinoDrect.h;
         JumpSpeed = 0;
-        DinoSta = StandL;
+        IsCrawl = downHeld;
+        DinoSta = downHeld ? CrawlR : StandL;
         DoubleJump = false;
     }
 }

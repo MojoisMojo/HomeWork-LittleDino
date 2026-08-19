@@ -49,9 +49,9 @@ void ResetPlay();
 
 /************ Base *************/
 //begin the game
-void BEGIN();
+bool BEGIN();
 //load the picture
-void LOAD();
+bool LOAD();
 //destroy and quit
 void QUIT();
 

@@ -1,5 +1,5 @@
 #ifndef BGD_H
-#define BND_H
+#define BGD_H
 
 #include "Base.h"
 #include "Cloud_Moon.h"

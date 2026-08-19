@@ -2,11 +2,232 @@
 #include <windows.h>
 #endif
 
+#include <errno.h>
+
 #include "DinoGame.h"
 
-static int RunDinoGame(void) {
-    BEGIN();
-    LOAD();
+static bool sdlInitialized = false;
+static bool imageInitialized = false;
+static bool fontInitialized = false;
+static bool gameLoaded = false;
+
+static void ReportStartupError(const char *message, const char *detail) {
+    char fullMessage[512];
+    if (detail && detail[0] != '\0')
+        snprintf(fullMessage, sizeof(fullMessage), "%s\n%s", message, detail);
+    else
+        snprintf(fullMessage, sizeof(fullMessage), "%s", message);
+
+    fprintf(stderr, "%s\n", fullMessage);
+    if (sdlInitialized)
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "DinoGame", fullMessage, Window);
+}
+
+static bool LoadSurface(const char *path, SDL_Surface **surface) {
+    char message[256];
+    *surface = IMG_Load(path);
+    if (*surface)
+        return true;
+
+    snprintf(message, sizeof(message), "Unable to load image: %s", path);
+    ReportStartupError(message, IMG_GetError());
+    return false;
+}
+
+static bool CreateTexture(const char *path, SDL_Surface *surface, SDL_Texture **texture) {
+    char message[256];
+    if (!surface) {
+        snprintf(message, sizeof(message), "Image was not loaded: %s", path);
+        ReportStartupError(message, NULL);
+        return false;
+    }
+
+    *texture = SDL_CreateTextureFromSurface(Renderer, surface);
+    if (*texture)
+        return true;
+
+    snprintf(message, sizeof(message), "Unable to create texture: %s", path);
+    ReportStartupError(message, SDL_GetError());
+    return false;
+}
+
+static bool LoadSurfaceAndTexture(const char *path, SDL_Surface **surface, SDL_Texture **texture) {
+    return LoadSurface(path, surface) && CreateTexture(path, *surface, texture);
+}
+
+static bool ApplyColorKey(const char *path, SDL_Surface *surface, Uint8 red, Uint8 green, Uint8 blue) {
+    char message[256];
+    if (!surface) {
+        snprintf(message, sizeof(message), "Image was not loaded: %s", path);
+        ReportStartupError(message, NULL);
+        return false;
+    }
+    if (SDL_SetColorKey(surface, SDL_TRUE,
+                        SDL_MapRGB(surface->format, red, green, blue)) == 0)
+        return true;
+
+    snprintf(message, sizeof(message), "Unable to configure transparency: %s", path);
+    ReportStartupError(message, SDL_GetError());
+    return false;
+}
+
+static void LoadWinState() {
+    char winchar[20];
+    FILE *winFile = fopen("data/Win.txt", "r");
+
+    Isinvincibe = false;
+    if (!winFile)
+        return;
+
+    if (fscanf(winFile, "%19s", winchar) == 1
+        && strcmp(winchar, "MojoMojowinwinwin") == 0)
+        Isinvincibe = true;
+    fclose(winFile);
+}
+
+static void LoadMaxScore() {
+    double savedScore;
+    FILE *scoreFile = fopen("data/MaxScore.txt", "r");
+
+    MaxScore = 0;
+    if (!scoreFile)
+        return;
+
+    if (fscanf(scoreFile, "%lf", &savedScore) == 1
+        && isfinite(savedScore) && savedScore >= 0)
+        MaxScore = savedScore;
+    fclose(scoreFile);
+}
+
+static void SaveMaxScore() {
+    FILE *scoreFile = fopen("data/MaxScore.txt", "w");
+    if (!scoreFile) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "Unable to save MaxScore.txt: %s", strerror(errno));
+        return;
+    }
+
+    bool writeFailed = fprintf(scoreFile, "%.lf", MaxScore) < 0;
+    if (fclose(scoreFile) == EOF)
+        writeFailed = true;
+    if (writeFailed)
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Unable to write MaxScore.txt");
+}
+
+static void ReleaseResources() {
+    if (MainBackGroundTexture) {
+        SDL_DestroyTexture(MainBackGroundTexture);
+        MainBackGroundTexture = NULL;
+    }
+    if (CloudTexture) {
+        SDL_DestroyTexture(CloudTexture);
+        CloudTexture = NULL;
+    }
+    if (MoonTexture) {
+        SDL_DestroyTexture(MoonTexture);
+        MoonTexture = NULL;
+    }
+    if (DinoTexture) {
+        SDL_DestroyTexture(DinoTexture);
+        DinoTexture = NULL;
+    }
+    for (int i = 0; i < GndObsVar; i++) {
+        if (GndObsTexture[i]) {
+            SDL_DestroyTexture(GndObsTexture[i]);
+            GndObsTexture[i] = NULL;
+        }
+    }
+    if (SkyObsTexture) {
+        SDL_DestroyTexture(SkyObsTexture);
+        SkyObsTexture = NULL;
+    }
+    if (LoseTexture) {
+        SDL_DestroyTexture(LoseTexture);
+        LoseTexture = NULL;
+    }
+    if (PauseTexture) {
+        SDL_DestroyTexture(PauseTexture);
+        PauseTexture = NULL;
+    }
+    if (BlankTexture) {
+        SDL_DestroyTexture(BlankTexture);
+        BlankTexture = NULL;
+    }
+
+    if (MainBackGroundSurface) {
+        SDL_FreeSurface(MainBackGroundSurface);
+        MainBackGroundSurface = NULL;
+    }
+    if (CloudSurface) {
+        SDL_FreeSurface(CloudSurface);
+        CloudSurface = NULL;
+    }
+    if (MoonSurface) {
+        SDL_FreeSurface(MoonSurface);
+        MoonSurface = NULL;
+    }
+    if (DinoSurface) {
+        SDL_FreeSurface(DinoSurface);
+        DinoSurface = NULL;
+    }
+    for (int i = 0; i < GndObsVar; i++) {
+        if (GndObsSurface[i]) {
+            SDL_FreeSurface(GndObsSurface[i]);
+            GndObsSurface[i] = NULL;
+        }
+    }
+    if (SkyObsSurface) {
+        SDL_FreeSurface(SkyObsSurface);
+        SkyObsSurface = NULL;
+    }
+    if (LoseSurface) {
+        SDL_FreeSurface(LoseSurface);
+        LoseSurface = NULL;
+    }
+    if (PauseSurface) {
+        SDL_FreeSurface(PauseSurface);
+        PauseSurface = NULL;
+    }
+    if (BlankSurface) {
+        SDL_FreeSurface(BlankSurface);
+        BlankSurface = NULL;
+    }
+    if (ScoreFont) {
+        TTF_CloseFont(ScoreFont);
+        ScoreFont = NULL;
+    }
+    if (Renderer) {
+        SDL_DestroyRenderer(Renderer);
+        Renderer = NULL;
+    }
+    if (Window) {
+        SDL_DestroyWindow(Window);
+        Window = NULL;
+    }
+    if (fontInitialized) {
+        TTF_Quit();
+        fontInitialized = false;
+    }
+    if (imageInitialized) {
+        IMG_Quit();
+        imageInitialized = false;
+    }
+    if (sdlInitialized) {
+        SDL_Quit();
+        sdlInitialized = false;
+    }
+    gameLoaded = false;
+}
+
+static int RunDinoGame() {
+    if (!BEGIN()) {
+        QUIT();
+        return 1;
+    }
+    if (!LOAD()) {
+        QUIT();
+        return 1;
+    }
     MainUI();
     QUIT();
     return 0;
@@ -35,12 +256,10 @@ void MainUI() {
     ResetBasic();
     AllQuit = false;
     PaintAll();
-    while (!AllQuit)
+    while (!AllQuit && SDL_WaitEvent(&MainEvent))
     {
-        while (SDL_PollEvent(&MainEvent))
+        switch (MainEvent.type)
         {
-            switch (MainEvent.type)
-            {
             case SDL_QUIT:
                 AllQuit = true;
                 break;
@@ -76,9 +295,8 @@ void MainUI() {
                 break;
             default:
                 break;
-            }
-            PaintAll();
         }
+        PaintAll();
     }
 }
 
@@ -188,11 +406,16 @@ void InPlay() {
                 {
                 case SDLK_s:
                 case SDLK_DOWN:
-                    if (MainEvent.type == SDL_KEYDOWN &&
-                        (MainEvent.key.keysym.sym == SDLK_s || MainEvent.key.keysym.sym == SDLK_DOWN))
-                        break;
-                    IsCrawl = false;
-                    DinoSta = StandL;
+                    {
+                        const Uint8 *keyboardState = SDL_GetKeyboardState(NULL);
+                        if (!keyboardState[SDL_SCANCODE_S] &&
+                            !keyboardState[SDL_SCANCODE_DOWN])
+                        {
+                            IsCrawl = false;
+                            DinoSta = StandL;
+                        }
+                    }
+                    break;
                 default:
                     break;
                 }
@@ -208,12 +431,10 @@ void LoseUI() {
     SDL_RenderCopy(Renderer, BlankTexture, NULL, NULL);
     SDL_RenderCopy(Renderer, LoseTexture, NULL, &BoxRect);
     SDL_RenderPresent(Renderer);
-    while (1)
+    while (SDL_WaitEvent(&MainEvent))
     {
-        while (SDL_PollEvent(&MainEvent))
+        switch (MainEvent.type)
         {
-            switch (MainEvent.type)
-            {
             case SDL_QUIT:
                 AllQuit = true;
                 return;
@@ -243,7 +464,6 @@ void LoseUI() {
                 }
             default:
                 break;
-            }
         }
     }
 
@@ -255,12 +475,10 @@ void PauseUI() {
     SDL_RenderCopy(Renderer, PauseTexture, NULL, &BoxRect);
     SDL_RenderPresent(Renderer);
     bool PauseQuit = false;
-    while (!PauseQuit)
+    while (!PauseQuit && SDL_WaitEvent(&MainEvent))
     {
-        while (SDL_PollEvent(&MainEvent))
+        switch (MainEvent.type)
         {
-            switch (MainEvent.type)
-            {
             case SDL_QUIT:
                 AllQuit = true;
                 PlayQuit = true;
@@ -307,12 +525,11 @@ void PauseUI() {
                 }
             default:
                 break;
-            }
-            PaintAll();
-            SDL_RenderCopy(Renderer, BlankTexture, NULL, NULL);
-            SDL_RenderCopy(Renderer, PauseTexture, NULL, &BoxRect);
-            SDL_RenderPresent(Renderer);
         }
+        PaintAll();
+        SDL_RenderCopy(Renderer, BlankTexture, NULL, NULL);
+        SDL_RenderCopy(Renderer, PauseTexture, NULL, &BoxRect);
+        SDL_RenderPresent(Renderer);
     }
 }
 
@@ -343,9 +560,7 @@ bool CheckCollisions() {
                 return true;
             break;
         case SKY:
-            if (IsCrawl)
-                return false;
-            if (CheckSingCollision(&pObs->Sky.rect, Skydx, Skydy))
+            if (!IsCrawl && CheckSingCollision(&pObs->Sky.rect, Skydx, Skydy))
                 return true;
             break;
         default:
@@ -367,7 +582,18 @@ void MoveAll() {
 
 void PaintMenu() {
     SDL_Surface *MenuSurface = IMG_Load("image/menu.png");
+    if (!MenuSurface) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "Unable to load image/menu.png: %s", IMG_GetError());
+        return;
+    }
     SDL_Texture *MenuTexture = SDL_CreateTextureFromSurface(Renderer, MenuSurface);
+    if (!MenuTexture) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "Unable to create texture for image/menu.png: %s", SDL_GetError());
+        SDL_FreeSurface(MenuSurface);
+        return;
+    }
     SDL_RenderCopy(Renderer, BlankTexture, NULL, NULL);
     SDL_RenderCopy(Renderer, MenuTexture, NULL, NULL);
     SDL_FreeSurface(MenuSurface);
@@ -411,47 +637,73 @@ void ResetPlay() {
 
 /******************************** Base ********************************/
 
-void BEGIN() {
-    SDL_Init(SDL_INIT_EVERYTHING);
-    TTF_Init();
+bool BEGIN() {
+    if (SDL_Init(SDL_INIT_EVERYTHING) != 0) {
+        ReportStartupError("Unable to initialize SDL", SDL_GetError());
+        SDL_Quit();
+        return false;
+    }
+    sdlInitialized = true;
+
+    int imageFlags = IMG_Init(IMG_INIT_PNG);
+    imageInitialized = true;
+    if ((imageFlags & IMG_INIT_PNG) != IMG_INIT_PNG) {
+        ReportStartupError("Unable to initialize PNG support", IMG_GetError());
+        return false;
+    }
+    if (TTF_Init() != 0) {
+        ReportStartupError("Unable to initialize font support", TTF_GetError());
+        return false;
+    }
+    fontInitialized = true;
+
     SDL_EventState(SDL_MOUSEMOTION, SDL_IGNORE);//忽视事件处理与内存占用!!!
     Window =
         SDL_CreateWindow("DinoGame",
             SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
             wideth, height,
             SDL_WINDOW_SHOWN);
+    if (!Window) {
+        ReportStartupError("Unable to create the game window", SDL_GetError());
+        return false;
+    }
     Renderer = SDL_CreateRenderer(Window, -1, SDL_RENDERER_ACCELERATED);
+    if (!Renderer) {
+        ReportStartupError("Unable to create the game renderer", SDL_GetError());
+        return false;
+    }
+    srand((unsigned)time(NULL));
+    return true;
 }
 
 // load evey needed src
-void LOAD() {
-    fp = fopen("data/Win.txt", "r");
-    char *winchar = (char *)malloc(sizeof(char) * 20);
-    if (fp && fscanf(fp, "%s", winchar) != EOF && !strcmp(winchar, "MojoMojowinwinwin"))
-        Isinvincibe = true;
-    free(winchar);
-    if (fp)
-        fclose(fp);
+bool LOAD() {
+    LoadWinState();
 
     //this is for background
-    MainBackGroundSurface = IMG_Load("image/MBNG.png");
-    MainBackGroundTexture = SDL_CreateTextureFromSurface(Renderer, MainBackGroundSurface);//纹理到画笔
+    if (!LoadSurfaceAndTexture("image/MBNG.png", &MainBackGroundSurface, &MainBackGroundTexture))
+        return false;
     MainBackGroundDrect.w = MainBackGroundSrect.w = wideth;
     MainBackGroundDrect.h = MainBackGroundSrect.h = height;
     MainBackGroundSrect.y = (MainBackGroundSurface->h - height) / 2;
 
-    LoseSurface = IMG_Load("image/BoxEnd.png");
-    PauseSurface = IMG_Load("image/BoxPause.png");
-    LoseTexture = SDL_CreateTextureFromSurface(Renderer, LoseSurface);
-    PauseTexture = SDL_CreateTextureFromSurface(Renderer, PauseSurface);
+    if (!LoadSurface("image/BoxEnd.png", &LoseSurface)
+        || !LoadSurface("image/BoxPause.png", &PauseSurface)
+        || !CreateTexture("image/BoxEnd.png", LoseSurface, &LoseTexture)
+        || !CreateTexture("image/BoxPause.png", PauseSurface, &PauseTexture))
+        return false;
     GetDrectFromSurface(LoseSurface, &BoxRect, 1, 1, 1);
     BoxRect.x = (wideth - BoxRect.w) / 2;
     BoxRect.y = (height - BoxRect.h) / 2;
 
-    BlankSurface = IMG_Load("image/white.png");
-    BlankTexture = SDL_CreateTextureFromSurface(Renderer, BlankSurface);
+    if (!LoadSurfaceAndTexture("image/white.png", &BlankSurface, &BlankTexture))
+        return false;
 
     ScoreFont = TTF_OpenFont("font/GenshinDefault.ttf", FontSize);
+    if (!ScoreFont) {
+        ReportStartupError("Unable to load the score font", TTF_GetError());
+        return false;
+    }
 
     //for borned
     BornedRect.x = wideth / 20;
@@ -459,20 +711,21 @@ void LOAD() {
 
 
     //Moon&Cloud
-    MoonSurface = IMG_Load("image/Moon.png");
-    MoonTexture = SDL_CreateTextureFromSurface(Renderer, MoonSurface);
+    if (!LoadSurfaceAndTexture("image/Moon.png", &MoonSurface, &MoonTexture))
+        return false;
     GetDrectFromSurface(MoonSurface, &MoonRect, 1, 1, 1);
     MoonRect.x = rand() % (wideth - MoonRect.w);
     MoonRect.y = Sky_y - MoonRect.h;
 
-    CloudSurface = IMG_Load("image/cloud.png");
-    SDL_SetColorKey(CloudSurface, SDL_TRUE, SDL_MapRGB(CloudSurface->format, 255, 255, 255));
-    CloudTexture = SDL_CreateTextureFromSurface(Renderer, CloudSurface);
+    if (!LoadSurface("image/cloud.png", &CloudSurface)
+        || !ApplyColorKey("image/cloud.png", CloudSurface, 255, 255, 255)
+        || !CreateTexture("image/cloud.png", CloudSurface, &CloudTexture))
+        return false;
     InitCloud();
 
     //Dino
-    DinoSurface = IMG_Load("image/dinohh.png");
-    DinoTexture = SDL_CreateTextureFromSurface(Renderer, DinoSurface);
+    if (!LoadSurfaceAndTexture("image/dinohh.png", &DinoSurface, &DinoTexture))
+        return false;
     DinoDrect.w = DionWideth * DinoCoe;
     DinoDrect.h = DinoHeight * DinoCoe;
     DinoDrect.x = BornedRect.x;
@@ -485,77 +738,32 @@ void LOAD() {
         DinoSrect[i].y = i * DinoHeight;
     }
 
-    GndObsSurface[SingT] = IMG_Load("image/Tree.png");
-    SDL_SetColorKey(GndObsSurface[SingT], SDL_TRUE,
-        SDL_MapRGB(GndObsSurface[SingT]->format, 255, 255, 255));//white
-    GndObsTexture[SingT] = SDL_CreateTextureFromSurface(Renderer, GndObsSurface[SingT]);
-
-    GndObsSurface[SnowMan] = IMG_Load("image/snowman1.png");
-    SDL_SetColorKey(GndObsSurface[SnowMan], SDL_TRUE,
-        SDL_MapRGB(GndObsSurface[SnowMan]->format, 0, 0, 0));//black
-    GndObsTexture[SnowMan] = SDL_CreateTextureFromSurface(Renderer, GndObsSurface[SnowMan]);
-
-    GndObsSurface[SnowBall] = IMG_Load("image/snowball.png");
-    GndObsTexture[SnowBall] = SDL_CreateTextureFromSurface(Renderer, GndObsSurface[SnowBall]);
-
-    GndObsSurface[DoubG] = IMG_Load("image/DoubG.png");
-    SDL_SetColorKey(GndObsSurface[DoubG], SDL_TRUE,
-        SDL_MapRGB(GndObsSurface[DoubG]->format, 255, 255, 255));//white
-    GndObsTexture[DoubG] = SDL_CreateTextureFromSurface(Renderer, GndObsSurface[DoubG]);
-
-
-    GndObsSurface[TribG] = IMG_Load("image/TribG.png");
-    GndObsTexture[TribG] = SDL_CreateTextureFromSurface(Renderer, GndObsSurface[TribG]);
-
-    SkyObsSurface = IMG_Load("image/Bird.png");////////////////
-    SDL_SetColorKey(SkyObsSurface, SDL_TRUE,
-        SDL_MapRGB(SkyObsSurface->format, 255, 255, 255));//white
-    SkyObsTexture = SDL_CreateTextureFromSurface(Renderer, SkyObsSurface);
+    if (!LoadSurface("image/Tree.png", &GndObsSurface[SingT])
+        || !ApplyColorKey("image/Tree.png", GndObsSurface[SingT], 255, 255, 255)
+        || !CreateTexture("image/Tree.png", GndObsSurface[SingT], &GndObsTexture[SingT])
+        || !LoadSurface("image/snowman1.png", &GndObsSurface[SnowMan])
+        || !ApplyColorKey("image/snowman1.png", GndObsSurface[SnowMan], 0, 0, 0)
+        || !CreateTexture("image/snowman1.png", GndObsSurface[SnowMan], &GndObsTexture[SnowMan])
+        || !LoadSurfaceAndTexture("image/snowball.png", &GndObsSurface[SnowBall], &GndObsTexture[SnowBall])
+        || !LoadSurface("image/DoubG.png", &GndObsSurface[DoubG])
+        || !ApplyColorKey("image/DoubG.png", GndObsSurface[DoubG], 255, 255, 255)
+        || !CreateTexture("image/DoubG.png", GndObsSurface[DoubG], &GndObsTexture[DoubG])
+        || !LoadSurfaceAndTexture("image/TribG.png", &GndObsSurface[TribG], &GndObsTexture[TribG])
+        || !LoadSurface("image/Bird.png", &SkyObsSurface)
+        || !ApplyColorKey("image/Bird.png", SkyObsSurface, 255, 255, 255)
+        || !CreateTexture("image/Bird.png", SkyObsSurface, &SkyObsTexture))
+        return false;
     GetDrectFromSurface(SkyObsSurface, &SkyObsRect_wh, 0.6, 1, 1);
 
-    fp = fopen("data/MaxScore.txt", "r+");
-    fscanf(fp, "%lf", &MaxScore);
-    fclose(fp);
+    LoadMaxScore();
+    gameLoaded = true;
+    return true;
 }
 
 //delete all
 void QUIT() {
-    printf("Down!\n");
-
-
-    SDL_FreeSurface(MainBackGroundSurface);
-    SDL_FreeSurface(CloudSurface);
-    SDL_FreeSurface(MoonSurface);
-    SDL_FreeSurface(DinoSurface);
-    for (int i = 0; i < GndObsVar; i++)
-        SDL_FreeSurface(GndObsSurface[i]);
-    SDL_FreeSurface(SkyObsSurface);
-    SDL_FreeSurface(LoseSurface);
-    SDL_FreeSurface(PauseSurface);
-    SDL_FreeSurface(BlankSurface);
-
-    SDL_DestroyTexture(MainBackGroundTexture);
-    SDL_DestroyTexture(CloudTexture);
-    SDL_DestroyTexture(MoonTexture);
-    SDL_DestroyTexture(DinoTexture);
-    for (int i = 0; i < GndObsVar; i++)
-        SDL_DestroyTexture(GndObsTexture[i]);
-    SDL_DestroyTexture(SkyObsTexture);
-    SDL_DestroyTexture(LoseTexture);
-    SDL_DestroyTexture(PauseTexture);
-    SDL_DestroyTexture(BlankTexture);
-
-
-    TTF_CloseFont(ScoreFont);
-
-
-    SDL_DestroyRenderer(Renderer);
-    SDL_DestroyWindow(Window);
-    fp = fopen("data/MaxScore.txt", "w+");
-    fprintf(fp, "%.lf", MaxScore);
-    fclose(fp);
-
-    SDL_Quit();
-    exit(0);
+    if (gameLoaded)
+        SaveMaxScore();
+    ReleaseResources();
 }
 

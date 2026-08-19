@@ -14,10 +14,11 @@
 #define MyMax(a,b) (a) > (b) ? (a) : (b)
 #define MyMin(a,b) (a) < (b) ? (a) : (b)
 #define MySwap(a,b) \
+    do { \
         int tempofswap = (a); \
-        (a) = (b);\
-        (b) = t;\
-srand(time(NULL));
+        (a) = (b); \
+        (b) = tempofswap; \
+    } while (0)
 //boundary
 #define wideth 1200
 #define height 600

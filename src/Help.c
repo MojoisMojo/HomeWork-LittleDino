@@ -6,9 +6,20 @@ char Rulechar[25];
 SDL_Rect RuleRect;
 
 void PaintRule(int *index) {
-    sprintf(Rulechar, "image/rule%d.png", *index);
+    snprintf(Rulechar, sizeof(Rulechar), "image/rule%d.png", *index);
     SDL_Surface *RuleSurface = IMG_Load(Rulechar);
+    if (!RuleSurface) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "Unable to load %s: %s", Rulechar, IMG_GetError());
+        return;
+    }
     SDL_Texture *RuleTexture = SDL_CreateTextureFromSurface(Renderer, RuleSurface);
+    if (!RuleTexture) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "Unable to create texture for %s: %s", Rulechar, SDL_GetError());
+        SDL_FreeSurface(RuleSurface);
+        return;
+    }
     GetDrectFromSurface(RuleSurface, &RuleRect, 1, 1, 1);
     RuleRect.x = (wideth - RuleRect.w) / 2;
     RuleRect.y = (height - RuleRect.h) / 2;
@@ -23,12 +34,10 @@ void HelpUI(bool *quit) {
     int index = 0;
     SDL_RenderCopy(Renderer, BlankTexture, NULL, NULL);
     PaintRule(&index);
-    while (1)
+    while (SDL_WaitEvent(&MainEvent))
     {
-        while (SDL_PollEvent(&MainEvent))
+        switch (MainEvent.type)
         {
-            switch (MainEvent.type)
-            {
             case SDL_QUIT:
                 AllQuit = true;
                 PlayQuit = true;
@@ -70,8 +79,7 @@ void HelpUI(bool *quit) {
                 break;
             default:
                 break;
-            }
-            PaintRule(&index);
         }
+        PaintRule(&index);
     }
 }
